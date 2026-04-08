@@ -1,140 +1,149 @@
 import requests
-import json
-from config import GEMINI_API_KEY, REPORT_LANGUAGE
+import time
+from config import GROQ_API_KEY, REPORT_LANGUAGE
+
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = "llama-3.3-70b-versatile"
+
+# === COMPANY CONTEXT ===
+# Qanvit (www.qanvit.com) is an AI agents platform for Corporate Venture and Open Innovation.
+# Core product: Connects corporates, technology parks and clusters with the right startups
+# for their innovation challenges using autonomous AI agents.
+# Target customers:
+#   - Large corporations with innovation/CVC departments
+#   - Technology parks (parques tecnológicos) and science clusters
+#   - Innovation hubs looking to run open challenges
+# Key differentiators:
+#   - AI-automated matching between corporates and startups
+#   - Not just a directory — agents actively qualify and recommend startups
+#   - Serves as deal-flow infrastructure for CVC and open innovation programs
+# Competitors: Dealroom, F6S, Open Innovation platforms, Wayra (Telefónica), CVC arms of large corps
+# Key market signals to monitor:
+#   - CVC fund announcements and new investment programs in Spain/Europe
+#   - New open innovation challenges launched by corporations
+#   - Startup funding rounds (Series A+ in Spain/Europe, esp. B2B/DeepTech)
+#   - New tech parks or clusters launching innovation programs
+#   - AI for corporate-startup matching / deal-flow automation tools (competitors)
+#   - Policy: PERTE, CDTI programas, Ley de Startups updates
+
+COMPANY_CONTEXT = """
+CONTEXTO DE EMPRESA:
+Qanvit (www.qanvit.com) es una plataforma de agentes de IA para Corporate Venture e Innovación Abierta.
+- PRODUCTO: Agentes de IA que conectan automáticamente corporados, parques tecnológicos y clústeres con las startups más adecuadas para sus retos de innovación. Va más allá de un directorio: los agentes cualifican y recomiendan activamente.
+- CLIENTES: (1) Grandes corporaciones con departamentos de CVC o innovación, (2) Parques tecnológicos y clústeres que organizan programas de open innovation, (3) Hubs de innovación que buscan deal-flow de startups.
+- DIFERENCIADORES: Matching IA automatizado (no solo búsqueda manual). Infraestructura de deal-flow para CVC y open innovation. 
+- COMPETIDORES: Dealroom, F6S, plataformas de open innovation, Wayra (Telefónica), brazos CVC de grandes corporaciones, Corporate Innovation firms.
+- ETAPA: Startup en fase de tracción, buscando primeros clientes corporativos y alianzas con parques tecnológicos.
+"""
+
+
+def _call_groq(prompt, max_retries=4):
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 4096
+    }
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"Groq API call attempt {attempt}/{max_retries}...")
+            r = requests.post(GROQ_URL, json=payload, headers=headers, timeout=60)
+            if r.status_code == 429:
+                wait = 15 * attempt
+                print(f"Rate limit. Waiting {wait}s...")
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            data = r.json()
+            text = data["choices"][0]["message"]["content"]
+            return text.replace("```html", "").replace("```", "").strip()
+        except Exception as e:
+            print(f"Error on attempt {attempt}: {e}")
+            time.sleep(5)
+    return None
+
 
 class ReportGenerator:
-    def __init__(self):
-        self.api_key = GEMINI_API_KEY
-        # Use v1beta and gemini-2.5-flash (confirmed available via browser)
-        self.model_name = "models/gemini-2.5-flash"
-        self.url = f"https://generativelanguage.googleapis.com/v1beta/{self.model_name}:generateContent?key={self.api_key}"
-        print(f"Using Gemini URL: {self.url.split('?')[0]}?key=HIDDEN")
-
     def generate_report(self, search_results):
-        """Synthesize search results into a 1-page structured report using REST API."""
-        if not self.api_key or self.api_key == "YOUR_GEMINI_API_KEY_HERE":
-            return self._generate_fallback_report(search_results)
+        prompt = f"""Eres el analista de inteligencia de mercado interno de Qanvit. Tienes acceso al siguiente contexto de empresa:
 
-        prompt = f"""
-        Actúa como un analista de mercado experto para la startup 'Duale' (www.duale.es).
-        Duale es un copilot de IA para FP Dual que ayuda a la inclusión de alumnos con NEE (Necesidades Educativas Especiales).
-        
-        A partir de los siguientes resultados de búsqueda REALES de esta semana (que incluyen el contenido extraído de las webs), redacta un informe de 1 página bien organizado en HTML.
-        
-        Resultados de búsqueda (Contenido extraído):
-        {search_results}
-        
-        El informe debe ser EXTREMADAMENTE ESPECÍFICO. No acepto generalidades.
-        Si mencionas un competidor, di qué está haciendo. Si mencionas una ayuda, di el nombre, plazo y cuantía si aparece.
-        Si mencionas una noticia, di la fecha y el medio.
-        
-        Estructura:
-        1. COMPETIDORES (Nuevos o movimientos detectados).
-        2. TENDENCIAS Y NOTICIAS RECIENTES (FP, IA en inclusión).
-        3. AYUDAS Y FINANCIACIÓN (Convocatorias abiertas, BOE, diarios oficiales, NextGen).
-        4. PROYECTOS PÚBLICOS Y LICITACIONES (Ministerio, Consejerías).
-        Actúa como un Analista de Innovación Senior de 'Qanvit' (www.qanvit.com), una plataforma de Corporate Venture que utiliza agentes IA para conectar grandes corporaciones con startups para resolver retos de innovación corporativa.
-        
-        A partir de los siguientes resultados de búsqueda web de esta semana sobre corporate venture y startups:
-        {search_results}
-        
-        Redacta un informe ejecutivo (Executive Summary) de 1 página en HTML. 
-        Este informe será leído por directivos de Qanvit. El tono debe ser profesional, analítico y directo, destacando "señales de mercado".
-        
-        REQUISITOS DEL INFORME:
-        - NO inventes datos. Usa SOLO la información proporcionada. Si no hay datos, indícalo.
-        - Cuerpo en HTML (sólo el contenido, sin <html> ni <body>).
-        - Estructura sugerida:
-          1. <h2>Movimientos Estratégicos y CVC</h2> (tendencias de corporate venture, nuevos fondos).
-          2. <h2>Startups y Ecosistemas de Innovación</h2> (nuevas startups B2B, programas de aceleración, hubs).
-          3. <h2>Oportunidades Qanvit</h2> (cómo Qanvit puede aprovechar esta información).
-        - Usa listas (<ul><li>) para resumir puntos clave y pon en negrita los nombres de corporaciones y startups clave.
-        - INCLUYE SIEMPRE UN ENLACE a la noticia original. Para los enlaces crudos de la información usa: <a href="ENLACE" target="_blank">[Fuente]</a>.
-        """
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }],
-            "generationConfig": {
-                "temperature": 0.2
-            }
-        }
-        
-        try:
-            print("Generating report via Gemini REST API...")
-            response = requests.post(self.url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            
-            # Extract text from response
-            if "candidates" in data and len(data["candidates"]) > 0:
-                html_report = data["candidates"][0]["content"]["parts"][0]["text"]
-                return html_report.replace("```html", "").replace("```", "").strip()
-            else:
-                print("No candidates found in Gemini response.")
-                return self._generate_fallback_report(search_results)
-                
-        except Exception as e:
-            print(f"Error generating report with Gemini REST API: {e}")
-            return self._generate_fallback_report(search_results)
+{COMPANY_CONTEXT}
+
+A partir de los siguientes resultados de búsqueda de esta semana:
+{search_results}
+
+Redacta un informe de inteligencia semanal en HTML puro (sin <html> ni <body>).
+El informe debe ser ESPECÍFICO y ACCIONABLE. Nombra fondos, startups, corporaciones y events concretos con fechas e importes reales.
+
+ESTRUCTURA OBLIGATORIA:
+
+<h2>🏦 Movimientos CVC y Fondos de Inversión</h2>
+Nuevos fondos de Corporate Venture Capital anunciados, rondas de inversión en España/Europa, programas de inversión corporativa.
+Menciona: nombre del fondo/programa, corporación patrocinadora, tamaño del fondo, foco sectorial.
+
+<h2>🚀 Startups y Ecosistema de Innovación</h2>
+Startups B2B destacadas que han levantado capital o lanzado productos esta semana en España/Europa.
+Nuevos programas de aceleración o open challenges lanzados por corporaciones o parques tecnológicos.
+Menciona: nombre de la startup, sector, ronda y cuantía. ¿Podrían ser candidatas para retos de empresas clientes de Qanvit?
+
+<h2>🏢 Corporaciones Buscando Innovación</h2>
+Grandes empresas que han anunciado programas de innovación abierta, búsqueda de startups, o retos corporativos.
+Estas son OPORTUNIDADES DE VENTA DIRECTA para Qanvit.
+
+<h2>⚙️ Tecnología y Competidores</h2>
+Nuevas herramientas o plataformas de deal-flow, CVC management, o corporate-startup matching.
+¿Algún competidor (Dealroom, F6S, etc.) ha lanzado algo nuevo? ¿Qué implica para Qanvit?
+
+<h2>🎯 Oportunidades Clave para Qanvit esta semana</h2>
+3-5 acciones concretas: contactar con X corporación, presentarse a Y programa, vigilar Z convocatoria.
+
+REGLAS DE FORMATO:
+- Usa <ul><li> para bullets. Pon en <strong> nombres de corporaciones, fondos y startups.
+- Incluye el enlace fuente: <a href="URL" target="_blank">[Fuente]</a>
+- Si no hay datos para una sección: <p><em>Sin noticias relevantes esta semana.</em></p>
+- Idioma: Español."""
+
+        result = _call_groq(prompt)
+        if result:
+            return result
+        return self._fallback(search_results)
 
     def generate_linkedin_post(self, search_results):
-        """Generate a LinkedIn newsletter post from the search results."""
-        if not self.api_key or self.api_key == "YOUR_GEMINI_API_KEY_HERE":
-            return "No se pudo generar el post de LinkedIn porque la API de Gemini no está configurada."
+        prompt = f"""Eres el Community Manager de Qanvit (www.qanvit.com), plataforma de agentes IA para Corporate Venture.
 
-        prompt = f"""
-        Actúa como el Community Manager de 'Qanvit' (www.qanvit.com).
-        
-        A partir de los siguientes resultados de búsqueda de esta semana, redacta un POST DE LINKEDIN brillante, estilo "Newsletter Semanal de Innovación" que resuma la actualidad del corporate venture y open innovation para un público muy profesional (directores de innovación, fundadores de startups, inversores).
-        
-        Resultados de búsqueda:
-        {search_results}
-        
-        Instrucciones para el POST:
-        - Tono: Ejecutivo, prospectivo y orientado al negocio (🚀) y la colaboración (🤝).
-        - Estructura: 
-          1. Gancho inicial potente sobre el estado de la innovación corporativa.
-          2. Tres viñetas (bullets) con los movimientos clave (fondos, startups, retos).
-          3. Reflexión final: el rol de Qanvit como agente vinculante entre corporaciones y startups.
-          4. Llamada a la acción animando al debate o visitar qanvit.com.
-        - Longitud óptima para lectura móvil.
-        - Hashtags: #CorporateVenture #OpenInnovation #Startups #Qanvit #BusinessEcosystem
-        - Idioma: Español.
-        """
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }],
-            "generationConfig": {
-                "temperature": 0.2
-            }
-        }
-        
-        try:
-            print("Generating LinkedIn post via Gemini REST API...")
-            response = requests.post(self.url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            
-            if "candidates" in data and len(data["candidates"]) > 0:
-                post_text = data["candidates"][0]["content"]["parts"][0]["text"]
-                return post_text.strip()
-            else:
-                return "Error: No se encontró contenido en la respuesta de Gemini."
-        except Exception as e:
-            print(f"Error generating LinkedIn post: {e}")
-            return f"Error: {e}"
+{COMPANY_CONTEXT}
 
-    def _generate_fallback_report(self, search_results):
-        """Simple fallback if Gemini is not available."""
-        html = "<h1>Informe Semanal de Mercado - Duale</h1>"
-        html += "<p>Nota: Este es un informe simplificado (Error en Gemini API o clave no configurada).</p>"
-        for query, urls in search_results.items():
-            html += f"<h3>{query}</h3><ul>"
-            for url in urls:
-                html += f"<li><a href='{url}'>{url}</a></li>"
+Basándote en estos resultados de búsqueda de esta semana:
+{search_results}
+
+Redacta un post de LinkedIn semanal de máximo 300 palabras. Público: directores de innovación, responsables de CVC, fundadores de startups B2B, gestores de parques tecnológicos.
+
+Estructura:
+1. Dato o tendencia de la semana que llame la atención (cifra concreta, movimiento de mercado).
+2. 3 señales relevantes del ecosistema CVC/startups (con nombres y datos reales).
+3. Reflexión sobre el rol de Qanvit como infraestructura de deal-flow para la innovación corporativa.
+4. CTA: debate o visitar qanvit.com.
+
+Tono: Ejecutivo, analítico, con autoridad de mercado. Sin ser vendedor. Saltos de línea frecuentes.
+Hashtags: #CorporateVenture #OpenInnovation #Startups #Qanvit #InnovaciónCorporativa
+Idioma: Español."""
+
+        result = _call_groq(prompt)
+        return result or "Post no disponible esta semana."
+
+    def _fallback(self, search_results):
+        html = "<h1>Informe Qanvit — Datos Recopilados</h1>"
+        html += "<p><em>El motor de IA no pudo conectar esta semana. Aquí están los datos en bruto:</em></p>"
+        for query, items in search_results.items():
+            html += f"<h3>🔍 {query}</h3><ul>"
+            for item in items:
+                if isinstance(item, dict):
+                    url = item.get('url', '#')
+                    content = item.get('content', '')[:300]
+                    html += f"<li><a href='{url}' target='_blank'>[Fuente]</a> — {content}</li>"
             html += "</ul>"
         return html

@@ -4,7 +4,7 @@ from src.email_service import EmailService
 import datetime
 
 def main():
-    print(f"--- Duale Research Agent Staring: {datetime.datetime.now()} ---")
+    print(f"--- Qanvit Research Agent Staring: {datetime.datetime.now()} ---")
     
     # 1. Search
     search_service = SearchService()
@@ -26,7 +26,7 @@ def main():
     # 4. Send Email
     email_service = EmailService()
     today = datetime.date.today().strftime("%d/%m/%Y")
-    subject = f"Informe Semanal de Mercado Duale - {today}"
+    subject = f"Informe Semanal de Mercado Qanvit - {today}"
     
     success = email_service.send_email(subject, report_html)
     
